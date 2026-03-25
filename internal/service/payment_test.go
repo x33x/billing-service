@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/x33x/billing-service/internal/domain"
@@ -69,8 +70,10 @@ func TestProcess_AccountNotFound(t *testing.T) {
 		Status:    domain.TxStatusPending,
 	}
 
-	if err := processor.Process(tx); err == nil {
-		t.Error("expected error for empty AccountID, got nil")
+	err := processor.Process(tx)
+
+	if !errors.Is(err, domain.ErrAccountNotFound) {
+		t.Errorf("expected ErrAccountNotFound, got %v", err)
 	}
 }
 
@@ -96,10 +99,9 @@ func TestProcess_DuplicateTransaction(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if err := processor.Process(tx); err == nil {
-		t.Error("expected error for duplicate tx-1, got nil")
-	} else if err.Error() != "duplicate transaction: tx-1" {
-		t.Errorf("unexpected error message: %v", err)
+	err := processor.Process(tx)
+	if !errors.Is(err, domain.ErrDuplicateTransaction) {
+		t.Errorf("expected ErrDuplicateTransaction, got %v", err)
 	}
 
 }

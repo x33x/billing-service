@@ -11,7 +11,8 @@ type MemoryPaymentProcessor struct {
 	transactions map[string]struct{}
 }
 
-// var _ PaymentProcessor = (*MemoryPaymentProcessor)(nil) // test interface
+// check interface
+var _ PaymentProcessor = (*MemoryPaymentProcessor)(nil)
 
 func NewMemoryPaymentProcessor(accounts []*domain.Account) *MemoryPaymentProcessor {
 	m := map[string]*domain.Account{}
@@ -28,16 +29,16 @@ func NewMemoryPaymentProcessor(accounts []*domain.Account) *MemoryPaymentProcess
 
 func (p *MemoryPaymentProcessor) Process(tx domain.Transaction) error {
 	if err := tx.Validate(); err != nil {
-		return err // if validate is failed then return err
+		return err
 	}
 
 	if _, exists := p.transactions[tx.ID]; exists {
-		return fmt.Errorf("duplicate transaction: %s", tx.ID)
+		return fmt.Errorf("Process: duplicate transaction %q: %w", tx.ID, domain.ErrDuplicateTransaction) // ("duplicate transaction: %s", tx.ID)
 	}
 
 	acc, ok := p.accounts[tx.AccountID] // search in map (acc is value, ok - bool (true - index found, false - index NOT found))
 	if !ok {                            // if not found
-		return fmt.Errorf("account not found: %s", tx.AccountID)
+		return fmt.Errorf("Process: account not found %q: %w", tx.AccountID, domain.ErrAccountNotFound) // ("account not found: %s", tx.AccountID)
 	}
 
 	// exec method Apply on real account
@@ -52,10 +53,9 @@ func (p *MemoryPaymentProcessor) Process(tx domain.Transaction) error {
 }
 
 func (p *MemoryPaymentProcessor) GetBalance(accountID string) (int64, error) {
-	acc, ok := p.accounts[accountID] // search in map (acc is value, ok - bool (true - index found, false - index NOT found))
-
-	if !ok { // if not found
-		return 0, fmt.Errorf("account not found: %s", accountID)
+	acc, ok := p.accounts[accountID]
+	if !ok {
+		return 0, fmt.Errorf("GetBalance: account not found %q: %w", accountID, domain.ErrAccountNotFound) // ("account not found: %s", accountID)
 	}
 
 	return acc.Balance, nil // if account found then return balance and error=nil
