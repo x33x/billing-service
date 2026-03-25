@@ -34,6 +34,10 @@ func (a *Account) Apply(tx Transaction) error {
 		return fmt.Errorf("account is %s", a.Status)
 	}
 
+	if tx.Status != TxStatusPending {
+		return fmt.Errorf("transaction must be pending")
+	}
+
 	if tx.Type == TxTypeDebit && !a.CanDebit(tx.Amount) {
 		return fmt.Errorf("insufficient funds: balance %d, amount %d", a.Balance, tx.Amount)
 	}
