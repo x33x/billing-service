@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/joho/godotenv"
+
+	"github.com/x33x/billing-service/internal/db"
 )
 
 var startTime = time.Now()
@@ -50,6 +57,31 @@ func writeJSON(w http.ResponseWriter, status int, resp APIResponse) {
 }
 
 func main() {
+	ctx := context.Background()
+
+	// load .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found")
+	}
+
+	connString := fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_NAME"),
+		os.Getenv("DB_SSLMODE"),
+	)
+
+	// connect to db
+	database, err := db.New(ctx, connString)
+	if err != nil {
+		log.Fatalf("connect to db: %v", err)
+	}
+	defer database.Close()
+	log.Println("connected to database")
+
 	// register handlers
 	http.HandleFunc("/health", healthCheck)
 	http.HandleFunc("/ping", pingCheck)
