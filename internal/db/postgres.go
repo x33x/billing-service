@@ -9,11 +9,11 @@ import (
 )
 
 type DB struct {
-	pool *pgxpool.Pool
+	pool *pgxpool.Pool // private (first letter is in low case)
 }
 
 func New(ctx context.Context, connString string) (*DB, error) {
-	cfg, err := pgxpool.ParseConfig(connString)
+	cfg, err := pgxpool.ParseConfig(connString) // build config
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
@@ -23,7 +23,7 @@ func New(ctx context.Context, connString string) (*DB, error) {
 	cfg.MaxConnLifetime = 5 * time.Minute
 	cfg.MaxConnIdleTime = 10 * time.Minute
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := pgxpool.NewWithConfig(ctx, cfg) // create new pool with config cfg
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
