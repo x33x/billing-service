@@ -50,14 +50,3 @@ func (r *AccountRepository) Create(ctx context.Context, acc domain.Account) erro
 
 	return nil
 }
-
-func (r *AccountRepository) UpdateBalance(ctx context.Context, id string, balance int64) error {
-	query := "update accounts set balance = $1 where id = $2"
-	_, err := r.db.Pool().Exec(ctx, query, balance, id)
-
-	if err != nil {
-		return fmt.Errorf("UpdateBalance: %w", err)
-	}
-
-	return nil
-}
