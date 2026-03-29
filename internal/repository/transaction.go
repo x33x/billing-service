@@ -1,0 +1,85 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/x33x/billing-service/internal/db"
+	"github.com/x33x/billing-service/internal/domain"
+)
+
+type TransactionRepository struct {
+	db *db.DB
+}
+
+func NewTransactionRepository(db *db.DB) *TransactionRepository {
+	return &TransactionRepository{db: db}
+}
+
+func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transaction) error {
+	// begin tran
+	dbTx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	// rollback if something wrong
+	defer dbTx.Rollback(ctx)
+
+	// save transaction in table
+	query := "insert into transactions (id, account_id, amount, type, status) values ($1, $2, $3, $4, $5)"
+	_, err = dbTx.Exec(ctx, query, tx.ID, tx.AccountID, tx.Amount, tx.Type, tx.Status)
+	if err != nil {
+		return fmt.Errorf("insert: %w", err)
+	}
+
+	// update balance in table
+	switch tx.Type {
+	case domain.TxTypeDebit:
+		query = "update accounts set balance = balance - $1 where id = $2"
+	case domain.TxTypeCredit:
+		query = "update accounts set balance = balance + $1 where id = $2"
+	}
+	_, err = dbTx.Exec(ctx, query, tx.Amount, tx.AccountID)
+	if err != nil {
+		return fmt.Errorf("update balance: %w", err)
+	}
+
+	// commit
+	if err := dbTx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	return nil
+}
+
+func (r *TransactionRepository) GetByAccountID(ctx context.Context, accountID string) ([]domain.Transaction, error) {
+	query := "select id, account_id, amount, type, status, created_at from transactions where account_id = $1 order by created_at desc"
+	rows, err := r.db.Pool().Query(ctx, query, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("GetByAccountID: %w", err)
+	}
+	defer rows.Close()
+
+	txs := make([]domain.Transaction, 0) // init empty slice, not nil
+	for rows.Next() {
+		tx := domain.Transaction{}
+		if err := rows.Scan(
+			&tx.ID,
+			&tx.AccountID,
+			&tx.Amount,
+			&tx.Type,
+			&tx.Status,
+			&tx.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+
+		txs = append(txs, tx)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("GetByAccountID: %w", err)
+	}
+
+	return txs, nil
+}
