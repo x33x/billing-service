@@ -13,12 +13,13 @@ type Account struct {
 }
 
 type Transaction struct {
-	ID        string    `json:"id"`
-	AccountID string    `json:"account_id"`
-	Amount    int64     `json:"amount"`
-	Type      string    `json:"type"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	AccountID      string    `json:"account_id"`
+	Amount         int64     `json:"amount"`
+	Type           string    `json:"type"`
+	Status         string    `json:"status"`
+	IdempotencyKey *string   `json:"idempotency_key,omitempty"` // may be nill (null in db) or has value
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 const (

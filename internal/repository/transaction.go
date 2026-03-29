@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/x33x/billing-service/internal/db"
 	"github.com/x33x/billing-service/internal/domain"
 )
@@ -26,9 +28,14 @@ func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transactio
 	defer dbTx.Rollback(ctx)
 
 	// save transaction in table
-	query := "insert into transactions (id, account_id, amount, type, status) values ($1, $2, $3, $4, $5)"
-	_, err = dbTx.Exec(ctx, query, tx.ID, tx.AccountID, tx.Amount, tx.Type, tx.Status)
+	query := "insert into transactions (id, account_id, amount, type, status, idempotency_key) values ($1, $2, $3, $4, $5, $6)"
+	_, err = dbTx.Exec(ctx, query, tx.ID, tx.AccountID, tx.Amount, tx.Type, tx.Status, tx.IdempotencyKey)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // error unique violation
+			return fmt.Errorf("Create: %w", domain.ErrDuplicateTransaction)
+		}
+
 		return fmt.Errorf("insert: %w", err)
 	}
 
@@ -53,7 +60,7 @@ func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transactio
 }
 
 func (r *TransactionRepository) GetByAccountID(ctx context.Context, accountID string) ([]domain.Transaction, error) {
-	query := "select id, account_id, amount, type, status, created_at from transactions where account_id = $1 order by created_at desc"
+	query := "select idempotency_key, id, account_id, amount, type, status, created_at from transactions where account_id = $1 order by created_at desc"
 	rows, err := r.db.Pool().Query(ctx, query, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("GetByAccountID: %w", err)
@@ -64,6 +71,7 @@ func (r *TransactionRepository) GetByAccountID(ctx context.Context, accountID st
 	for rows.Next() {
 		tx := domain.Transaction{}
 		if err := rows.Scan(
+			&tx.IdempotencyKey,
 			&tx.ID,
 			&tx.AccountID,
 			&tx.Amount,
