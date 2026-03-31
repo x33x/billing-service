@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,49 +11,12 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/x33x/billing-service/internal/db"
+	"github.com/x33x/billing-service/internal/handler"
+	"github.com/x33x/billing-service/internal/repository"
+	"github.com/x33x/billing-service/internal/service"
 )
 
 var startTime = time.Now()
-
-// there are no classes in Go, only structs
-// this is my standard API response format
-type APIResponse struct {
-	Success bool   `json:"success"`
-	Data    any    `json:"data,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
-
-// w — answer to client, r — input request
-// healthCheck returns service status and current timestamp
-func healthCheck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, APIResponse{
-		Success: true,
-		Data: map[string]any{
-			"status":    "ok",
-			"service":   "billing-service",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-		},
-	})
-}
-
-// just ping service and uptime in seconds
-func pingCheck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, APIResponse{
-		Success: true,
-		Data: map[string]any{
-			"service":        "billing-service",
-			"version":        "0.1.0",
-			"uptime_seconds": int64(time.Since(startTime).Seconds()),
-			"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		},
-	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, resp APIResponse) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
-}
 
 func main() {
 	ctx := context.Background()
@@ -82,15 +44,50 @@ func main() {
 	defer database.Close()
 	log.Println("connected to database")
 
-	// register handlers
-	http.HandleFunc("/health", healthCheck)
-	http.HandleFunc("/ping", pingCheck)
+	// dependency injection - collect layers from down to up
+	accountRepo := repository.NewAccountRepository(database)
+	txRepo := repository.NewTransactionRepository(database)
+	paymentSvc := service.NewPaymentService(accountRepo, txRepo)
+	paymentHandler := handler.NewPaymentHandler(paymentSvc)
+
+	// routing
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", healthCheck)
+	mux.HandleFunc("GET /ping", pingCheck)
+	mux.HandleFunc("POST /payments", paymentHandler.CreatePayment)
+	mux.HandleFunc("GET /accounts/{id}/balance", paymentHandler.GetBalance)
+	mux.HandleFunc("GET /accounts/{id}/transactions", paymentHandler.GetTransactions)
 
 	log.Println("billing-service starting on :8080")
 
 	// ListenAndServe blocks - server is working till stop
 	// log.Fatal close app if server does not start
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// healthCheck returns service status and current timestamp
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+	handler.WriteJSON(w, http.StatusOK, handler.APIResponse{
+		Success: true,
+		Data: map[string]any{
+			"status":    "ok",
+			"service":   "billing-service",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+// just ping service and uptime in seconds
+func pingCheck(w http.ResponseWriter, r *http.Request) {
+	handler.WriteJSON(w, http.StatusOK, handler.APIResponse{
+		Success: true,
+		Data: map[string]any{
+			"service":        "billing-service",
+			"version":        "0.1.0",
+			"uptime_seconds": int64(time.Since(startTime).Seconds()),
+			"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		},
+	})
 }
