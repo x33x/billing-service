@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/x33x/billing-service/internal/db"
 	"github.com/x33x/billing-service/internal/domain"
@@ -90,4 +91,29 @@ func (r *TransactionRepository) GetByAccountID(ctx context.Context, accountID st
 	}
 
 	return txs, nil
+}
+
+func (r *TransactionRepository) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Transaction, error) {
+	tx := &domain.Transaction{}
+
+	query := "select id, account_id, amount, type, status, created_at, idempotency_key from transactions where idempotency_key = $1"
+	err := r.db.Pool().QueryRow(ctx, query, key).Scan(
+		&tx.ID,
+		&tx.AccountID,
+		&tx.Amount,
+		&tx.Type,
+		&tx.Status,
+		&tx.CreatedAt,
+		&tx.IdempotencyKey,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("GetByIdempotencyKey: %w", err)
+	}
+
+	return tx, nil
 }

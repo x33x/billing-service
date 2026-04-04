@@ -18,6 +18,7 @@ type TransactionWriter interface {
 
 type TransactionReader interface {
 	GetByAccountID(ctx context.Context, accountID string) ([]domain.Transaction, error)
+	GetByIdempotencyKey(ctx context.Context, key string) (*domain.Transaction, error)
 }
 
 type TransactionRepository interface {
@@ -40,6 +41,19 @@ func NewPaymentService(accounts AccountReader, transactions TransactionRepositor
 func (s *PaymentService) ProcessPayment(ctx context.Context, tx domain.Transaction) error {
 	tx.ID = fmt.Sprintf("tx_%d", time.Now().UnixNano())
 	tx.Status = domain.TxStatusPending
+
+	if tx.IdempotencyKey != nil {
+
+		txExist, err := s.transactions.GetByIdempotencyKey(ctx, *tx.IdempotencyKey)
+
+		if err != nil {
+			return fmt.Errorf("ProcessPayment: check idempotency: %w", err)
+		}
+
+		if txExist != nil {
+			return nil
+		}
+	}
 
 	acc, err := s.accounts.GetByID(ctx, tx.AccountID)
 	if err != nil {

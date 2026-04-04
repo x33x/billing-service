@@ -1,0 +1,1 @@
+drop table ledger_entries;
