@@ -22,6 +22,15 @@ type Transaction struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type LedgerEntry struct {
+	ID            string    `json:"id"`
+	TransactionID string    `json:"transaction_id"`
+	AccountID     string    `json:"account_id"`
+	Amount        int64     `json:"amount"`
+	Direction     string    `json:"direction"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 const (
 	AccountStatusActive  = "active"
 	AccountStatusBlocked = "blocked"
@@ -33,6 +42,11 @@ const (
 	TxStatusPending   = "pending"
 	TxStatusCompleted = "completed"
 	TxStatusFailed    = "failed"
+)
+
+const (
+	LedgerDirectionDebit  = "debit"
+	LedgerDirectionCredit = "credit"
 )
 
 func (a *Account) CanDebit(amount int64) bool {

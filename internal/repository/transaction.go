@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,11 +13,15 @@ import (
 )
 
 type TransactionRepository struct {
-	db *db.DB
+	db     *db.DB
+	ledger *LedgerRepository
 }
 
-func NewTransactionRepository(db *db.DB) *TransactionRepository {
-	return &TransactionRepository{db: db}
+func NewTransactionRepository(db *db.DB, ledger *LedgerRepository) *TransactionRepository {
+	return &TransactionRepository{
+		db:     db,
+		ledger: ledger,
+	}
 }
 
 func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transaction) error {
@@ -50,6 +55,29 @@ func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transactio
 	_, err = dbTx.Exec(ctx, query, tx.Amount, tx.AccountID)
 	if err != nil {
 		return fmt.Errorf("update balance: %w", err)
+	}
+
+	// insert ledger entries
+	now := time.Now().UnixNano()
+	entries := []domain.LedgerEntry{
+		{
+			ID:            fmt.Sprintf("ledger_%d_d", now),
+			TransactionID: tx.ID,
+			AccountID:     tx.AccountID,
+			Amount:        tx.Amount,
+			Direction:     domain.LedgerDirectionDebit,
+		},
+		{
+			ID:            fmt.Sprintf("ledger_%d_c", now),
+			TransactionID: tx.ID,
+			AccountID:     tx.AccountID,
+			Amount:        tx.Amount,
+			Direction:     domain.LedgerDirectionCredit,
+		},
+	}
+
+	if err := r.ledger.createBatch(ctx, dbTx, entries); err != nil {
+		return fmt.Errorf("Create: ledger: %w", err)
 	}
 
 	// commit

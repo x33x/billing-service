@@ -46,7 +46,8 @@ func main() {
 
 	// dependency injection - collect layers from down to up
 	accountRepo := repository.NewAccountRepository(database)
-	txRepo := repository.NewTransactionRepository(database)
+	ledgerRepo := repository.NewLedgerRepository(database)
+	txRepo := repository.NewTransactionRepository(database, ledgerRepo)
 	paymentSvc := service.NewPaymentService(accountRepo, txRepo)
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
 
