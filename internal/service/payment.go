@@ -29,12 +29,18 @@ type TransactionRepository interface {
 type PaymentService struct {
 	accounts     AccountReader
 	transactions TransactionRepository
+	feeConfig    domain.FeeConfig
 }
 
-func NewPaymentService(accounts AccountReader, transactions TransactionRepository) *PaymentService {
+func NewPaymentService(
+	accounts AccountReader,
+	transactions TransactionRepository,
+	feeConfig domain.FeeConfig,
+) *PaymentService {
 	return &PaymentService{
 		accounts:     accounts,
 		transactions: transactions,
+		feeConfig:    feeConfig,
 	}
 }
 
@@ -68,6 +74,12 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, tx domain.Transacti
 		return fmt.Errorf("ProcessPayment: %w", err)
 	}
 
+	if tx.Type == domain.TxTypeDebit {
+		if err := s.applyFee(ctx, tx); err != nil {
+			return fmt.Errorf("ProcessPayment: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -87,4 +99,26 @@ func (s *PaymentService) GetTransactions(ctx context.Context, accountID string) 
 	}
 
 	return txs, nil
+}
+
+func (s *PaymentService) applyFee(ctx context.Context, original domain.Transaction) error {
+	feeAmount := s.feeConfig.Calculate(original.Amount)
+
+	if feeAmount == 0 {
+		return nil
+	}
+
+	feeTx := domain.Transaction{
+		ID:        "fee_" + original.ID,
+		AccountID: original.AccountID,
+		Amount:    feeAmount,
+		Type:      domain.TxTypeFee,
+		Status:    domain.TxStatusPending,
+	}
+
+	if err := s.transactions.Create(ctx, feeTx); err != nil {
+		return fmt.Errorf("applyFee: %w", err)
+	}
+
+	return nil
 }

@@ -46,15 +46,22 @@ func (r *TransactionRepository) Create(ctx context.Context, tx domain.Transactio
 	}
 
 	// update balance in table
+	var result pgconn.CommandTag
 	switch tx.Type {
 	case domain.TxTypeDebit:
-		query = "update accounts set balance = balance - $1 where id = $2"
+		query = "update accounts set balance = balance - $1 where id = $2 and balance >= $1"
 	case domain.TxTypeCredit:
 		query = "update accounts set balance = balance + $1 where id = $2"
+	case domain.TxTypeFee:
+		query = "update accounts set balance = balance - $1 where id = $2 and balance >= $1"
 	}
-	_, err = dbTx.Exec(ctx, query, tx.Amount, tx.AccountID)
+	result, err = dbTx.Exec(ctx, query, tx.Amount, tx.AccountID)
 	if err != nil {
 		return fmt.Errorf("update balance: %w", err)
+	}
+
+	if result.RowsAffected() == 0 && (tx.Type == domain.TxTypeDebit || tx.Type == domain.TxTypeFee) {
+		return fmt.Errorf("update balance: %w", domain.ErrInsufficientFunds)
 	}
 
 	// insert ledger entries

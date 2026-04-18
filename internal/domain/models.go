@@ -31,6 +31,10 @@ type LedgerEntry struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+type FeeConfig struct {
+	Rate float64
+}
+
 const (
 	AccountStatusActive  = "active"
 	AccountStatusBlocked = "blocked"
@@ -47,6 +51,10 @@ const (
 const (
 	LedgerDirectionDebit  = "debit"
 	LedgerDirectionCredit = "credit"
+)
+
+const (
+	TxTypeFee = "fee"
 )
 
 func (a *Account) CanDebit(amount int64) bool {
@@ -88,7 +96,7 @@ func (tx *Transaction) Validate() error {
 		return fmt.Errorf("Validate: %w", ErrAmountMustBeGreaterThanZero)
 	}
 
-	if tx.Type != TxTypeDebit && tx.Type != TxTypeCredit {
+	if tx.Type != TxTypeDebit && tx.Type != TxTypeCredit && tx.Type != TxTypeFee {
 		return fmt.Errorf("Validate: unknown transaction type %q: %w", tx.Type, ErrUnknownTransactionType) // ("unknown type: %s", tx.Type)
 	}
 
@@ -97,4 +105,8 @@ func (tx *Transaction) Validate() error {
 	}
 
 	return nil
+}
+
+func (f FeeConfig) Calculate(amount int64) int64 {
+	return int64(float64(amount) * f.Rate)
 }

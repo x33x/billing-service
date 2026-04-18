@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/x33x/billing-service/internal/db"
+	"github.com/x33x/billing-service/internal/domain"
 	"github.com/x33x/billing-service/internal/handler"
 	"github.com/x33x/billing-service/internal/repository"
 	"github.com/x33x/billing-service/internal/service"
@@ -48,7 +49,8 @@ func main() {
 	accountRepo := repository.NewAccountRepository(database)
 	ledgerRepo := repository.NewLedgerRepository(database)
 	txRepo := repository.NewTransactionRepository(database, ledgerRepo)
-	paymentSvc := service.NewPaymentService(accountRepo, txRepo)
+	feeConfig := domain.FeeConfig{Rate: 0.015}
+	paymentSvc := service.NewPaymentService(accountRepo, txRepo, feeConfig)
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
 
 	// routing
