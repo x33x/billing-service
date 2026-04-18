@@ -1,107 +1,199 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/x33x/billing-service/internal/domain"
 )
 
-func TestGetBalance_Exists(t *testing.T) {
-	// 1. prepare data
-	acc := &domain.Account{
-		ID:       "acc-1",
-		Currency: "RUB",
-		Balance:  1000,
-		Status:   domain.AccountStatusActive,
+type mockAccountRepo struct {
+	accounts map[string]*domain.Account
+}
+
+type mockTxRepo struct {
+	byIdempotencyKey map[string]*domain.Transaction
+	created          []domain.Transaction
+	createErr        error
+}
+
+func (m *mockAccountRepo) GetByID(ctx context.Context, id string) (*domain.Account, error) {
+	acc, ok := m.accounts[id]
+	if !ok {
+		return nil, domain.ErrAccountNotFound
 	}
 
-	// 2. create processor with account
-	processor := NewMemoryPaymentProcessor([]*domain.Account{acc})
+	return acc, nil
+}
 
-	// 3. exec method GetBalance on account
-	balance, err := processor.GetBalance("acc-1")
+func (m *mockTxRepo) Create(ctx context.Context, tx domain.Transaction) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.created = append(m.created, tx)
 
-	// 4. check result
+	return nil
+}
+
+func (m *mockTxRepo) GetByAccountID(ctx context.Context, accountID string) ([]domain.Transaction, error) {
+	return nil, nil
+}
+
+func (m *mockTxRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Transaction, error) {
+	tx, ok := m.byIdempotencyKey[key]
+	if !ok {
+		return nil, nil
+	}
+
+	return tx, nil
+}
+
+func newService(acc *domain.Account, feeRate float64) (*PaymentService, *mockTxRepo) {
+	accRepo := &mockAccountRepo{
+		accounts: map[string]*domain.Account{acc.ID: acc},
+	}
+	txRepo := &mockTxRepo{
+		byIdempotencyKey: make(map[string]*domain.Transaction),
+	}
+	svc := NewPaymentService(accRepo, txRepo, domain.FeeConfig{Rate: feeRate})
+
+	return svc, txRepo
+}
+
+func TestProcessPayment_SuccessDebit(t *testing.T) {
+	acc := &domain.Account{
+		ID:      "acc-1",
+		Balance: 10000,
+		Status:  domain.AccountStatusActive,
+	}
+
+	svc, txRepo := newService(acc, 0.015)
+
+	tx := domain.Transaction{
+		AccountID: "acc-1",
+		Amount:    3000,
+		Type:      domain.TxTypeDebit,
+	}
+
+	err := svc.ProcessPayment(context.Background(), tx)
+
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if balance != 1000 {
-		t.Errorf("expected 1000, got %d", balance)
+	if len(txRepo.created) != 2 {
+		t.Errorf("expected 2 transactions (payment + fee), got %d", len(txRepo.created))
 	}
 }
 
-func TestProcess_SuccessDebit(t *testing.T) {
+func TestProcessPayment_InsufficientFunds(t *testing.T) {
 	acc := &domain.Account{
-		ID:       "acc-1",
-		Currency: "RUB",
-		Balance:  1000,
-		Status:   domain.AccountStatusActive,
+		ID:      "acc-1",
+		Balance: 1000,
+		Status:  domain.AccountStatusActive,
 	}
 
-	processor := NewMemoryPaymentProcessor([]*domain.Account{acc})
+	svc, _ := newService(acc, 0.015)
 
 	tx := domain.Transaction{
-		ID:        "tx-1",
+		AccountID: "acc-1",
+		Amount:    5000,
+		Type:      domain.TxTypeDebit,
+	}
+
+	err := svc.ProcessPayment(context.Background(), tx)
+
+	if !errors.Is(err, domain.ErrInsufficientFunds) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestProcessPayment_AccountBlocked(t *testing.T) {
+	acc := &domain.Account{
+		ID:      "acc-1",
+		Balance: 100,
+		Status:  domain.AccountStatusBlocked,
+	}
+
+	svc, _ := newService(acc, 0.015)
+
+	tx := domain.Transaction{
 		AccountID: "acc-1",
 		Amount:    300,
 		Type:      domain.TxTypeDebit,
-		Status:    domain.TxStatusPending,
 	}
 
-	if err := processor.Process(tx); err != nil {
+	err := svc.ProcessPayment(context.Background(), tx)
+
+	if !errors.Is(err, domain.ErrAccountBlocked) {
 		t.Errorf("unexpected error: %v", err)
 	}
-
-	if acc.Balance != 700 {
-		t.Errorf("expected 700, got %d", acc.Balance)
-	}
 }
 
-func TestProcess_AccountNotFound(t *testing.T) {
-	processor := NewMemoryPaymentProcessor([]*domain.Account{})
-
-	tx := domain.Transaction{
-		ID:        "tx-1",
-		AccountID: "acc-999",
-		Amount:    100,
-		Type:      domain.TxTypeDebit,
-		Status:    domain.TxStatusPending,
-	}
-
-	err := processor.Process(tx)
-
-	if !errors.Is(err, domain.ErrAccountNotFound) {
-		t.Errorf("expected ErrAccountNotFound, got %v", err)
-	}
-}
-
-func TestProcess_DuplicateTransaction(t *testing.T) {
+func TestProcessPayment_Idempotency(t *testing.T) {
 	acc := &domain.Account{
-		ID:       "acc-1",
-		Currency: "RUB",
-		Balance:  1000,
-		Status:   domain.AccountStatusActive,
+		ID:      "acc-1",
+		Balance: 10000,
+		Status:  domain.AccountStatusActive,
 	}
 
-	processor := NewMemoryPaymentProcessor([]*domain.Account{acc})
+	svc, txRepo := newService(acc, 0.015)
+
+	key := "order-1"
 
 	tx := domain.Transaction{
-		ID:        "tx-1",
-		AccountID: "acc-1",
-		Amount:    100,
-		Type:      domain.TxTypeDebit,
-		Status:    domain.TxStatusPending,
+		AccountID:      "acc-1",
+		Amount:         300,
+		Type:           domain.TxTypeDebit,
+		IdempotencyKey: &key,
 	}
 
-	if err := processor.Process(tx); err != nil {
+	err := svc.ProcessPayment(context.Background(), tx)
+
+	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	err := processor.Process(tx)
-	if !errors.Is(err, domain.ErrDuplicateTransaction) {
-		t.Errorf("expected ErrDuplicateTransaction, got %v", err)
+	txRepo.byIdempotencyKey[key] = &domain.Transaction{ID: "tx-exists"}
+
+	err = svc.ProcessPayment(context.Background(), tx)
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 
+	if len(txRepo.created) != 2 {
+		t.Errorf("expected 2 transactions (payment + fee), got %d", len(txRepo.created))
+	}
+}
+
+func TestProcessPayment_FeeCalculation(t *testing.T) {
+	acc := &domain.Account{
+		ID:      "acc-1",
+		Balance: 10000,
+		Status:  domain.AccountStatusActive,
+	}
+
+	svc, txRepo := newService(acc, 0.015)
+
+	tx := domain.Transaction{
+		AccountID: "acc-1",
+		Amount:    10000,
+		Type:      domain.TxTypeDebit,
+	}
+
+	err := svc.ProcessPayment(context.Background(), tx)
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if txRepo.created[1].Amount != 150 {
+		t.Errorf("expected fee amount equal to 150, got %d", txRepo.created[1].Amount)
+	}
+
+	if txRepo.created[1].Type != domain.TxTypeFee {
+		t.Errorf("expected type %q, got %q", domain.TxTypeFee, txRepo.created[1].Type)
+	}
 }
