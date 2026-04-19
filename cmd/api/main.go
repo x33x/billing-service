@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -12,6 +14,7 @@ import (
 	"github.com/x33x/billing-service/internal/db"
 	"github.com/x33x/billing-service/internal/domain"
 	"github.com/x33x/billing-service/internal/handler"
+	"github.com/x33x/billing-service/internal/logger"
 	"github.com/x33x/billing-service/internal/repository"
 	"github.com/x33x/billing-service/internal/service"
 )
@@ -25,20 +28,23 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found")
 	}
+	logger.Setup(os.Getenv("LOG_LEVEL"))
 
 	cfg, err := config.Load()
 
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("load config", "error", err)
+		os.Exit(1)
 	}
 
 	// connect to db
 	database, err := db.New(ctx, cfg.DSN)
 	if err != nil {
-		log.Fatalf("connect to db: %v", err)
+		slog.Error("connect to db", "error", err)
+		os.Exit(1)
 	}
 	defer database.Close()
-	log.Println("connected to database")
+	slog.Info("connected to database")
 
 	// dependency injection - collect layers from down to up
 	accountRepo := repository.NewAccountRepository(database)
@@ -56,12 +62,13 @@ func main() {
 	mux.HandleFunc("GET /accounts/{id}/balance", paymentHandler.GetBalance)
 	mux.HandleFunc("GET /accounts/{id}/transactions", paymentHandler.GetTransactions)
 
-	log.Printf("billing-service starting on %s", cfg.ServerAddr)
+	slog.Info("server starting", "addr", cfg.ServerAddr)
 
 	// ListenAndServe blocks - server is working till stop
 	// log.Fatal close app if server does not start
 	if err := http.ListenAndServe(cfg.ServerAddr, mux); err != nil {
-		log.Fatal(err)
+		slog.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
 }
 
