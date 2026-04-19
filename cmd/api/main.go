@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/joho/godotenv"
 
+	"github.com/x33x/billing-service/internal/config"
 	"github.com/x33x/billing-service/internal/db"
 	"github.com/x33x/billing-service/internal/domain"
 	"github.com/x33x/billing-service/internal/handler"
@@ -27,18 +26,14 @@ func main() {
 		log.Println("no .env file found")
 	}
 
-	connString := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-		os.Getenv("DB_SSLMODE"),
-	)
+	cfg, err := config.Load()
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// connect to db
-	database, err := db.New(ctx, connString)
+	database, err := db.New(ctx, cfg.DSN)
 	if err != nil {
 		log.Fatalf("connect to db: %v", err)
 	}
@@ -49,7 +44,7 @@ func main() {
 	accountRepo := repository.NewAccountRepository(database)
 	ledgerRepo := repository.NewLedgerRepository(database)
 	txRepo := repository.NewTransactionRepository(database, ledgerRepo)
-	feeConfig := domain.FeeConfig{Rate: 0.015}
+	feeConfig := domain.FeeConfig{Rate: cfg.FeeRate}
 	paymentSvc := service.NewPaymentService(accountRepo, txRepo, feeConfig)
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
 
@@ -61,11 +56,11 @@ func main() {
 	mux.HandleFunc("GET /accounts/{id}/balance", paymentHandler.GetBalance)
 	mux.HandleFunc("GET /accounts/{id}/transactions", paymentHandler.GetTransactions)
 
-	log.Println("billing-service starting on :8080")
+	log.Printf("billing-service starting on %s", cfg.ServerAddr)
 
 	// ListenAndServe blocks - server is working till stop
 	// log.Fatal close app if server does not start
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(cfg.ServerAddr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
